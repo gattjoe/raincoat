@@ -1,0 +1,207 @@
+(version 1)
+(deny default)
+
+;; ===== Process =====
+(allow process-exec*)
+(allow process-fork)
+(allow process-info*)
+(allow signal)
+(allow sysctl-read)
+(allow pseudo-tty)
+
+;; ===== File metadata (needed for stat/readdir everywhere, no content exposed) =====
+(allow file-read-metadata)
+;; L2: Scope xattr reads to paths already reachable via file-read-data rather
+;; than granting them system-wide (which would expose xattrs on ~/.ssh, ~/.aws, etc.).
+(allow file-read-xattr
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/System")
+    (subpath "/Library")
+    (subpath "/dev")
+    (subpath "/private/var")
+    (subpath "/private/etc")
+    (subpath "/private/tmp")
+    (subpath "/opt/homebrew")
+    (subpath "/Applications/Xcode.app")
+    (subpath (string-append (param "HOME") "/.local"))
+    (subpath (string-append (param "HOME") "/.claude"))
+    (subpath (string-append (param "HOME") "/.nvm"))
+    (subpath (string-append (param "HOME") "/Library"))
+    (subpath (param "WORKING_DIR"))
+    (subpath (param "TMPDIR")))
+
+;; ===== Executable mapping (dyld, Node.js JIT, Homebrew tools) =====
+(allow file-map-executable
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/System")
+    (subpath "/Library")
+    (subpath "/Applications")
+    (subpath "/opt/homebrew")
+    (subpath (string-append (param "HOME") "/.local/share/claude"))
+    (subpath (string-append (param "HOME") "/.nvm"))
+    (subpath (param "WORKING_DIR")))
+
+;; ===== File reads =====
+(allow file-read-data
+    ;; Root symlinks required for path resolution
+    (literal "/")
+    (literal "/var")
+    (literal "/etc")
+    (literal "/tmp")
+    (literal "/private")
+
+    ;; System binaries, libraries, frameworks
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/System")
+    (subpath "/Library")
+    (subpath "/dev")
+    (subpath "/private/var")
+    (subpath "/private/etc")
+    (subpath "/private/tmp")
+
+    ;; Homebrew
+    (subpath "/opt/homebrew")
+
+    ;; Xcode / Developer tools (git, xcrun, SDKs)
+    (subpath "/Applications/Xcode.app")
+
+    ;; Terminal app resources: terminfo (e.g. xterm-ghostty lives here, not in /usr/share/terminfo)
+    (subpath "/Applications/Ghostty.app/Contents/Resources")
+
+    ;; Claude Code binary and past versions
+    (subpath (string-append (param "HOME") "/.local/share/claude"))
+    (subpath (string-append (param "HOME") "/.local/bin"))
+
+    ;; Claude config: settings, history, sessions, plugins, skills, memory
+    (subpath (string-append (param "HOME") "/.claude"))
+
+    ;; Node.js runtime (for tools Claude Code spawns)
+    (subpath (string-append (param "HOME") "/.nvm"))
+
+    ;; Git config (needed for git operations in working dir)
+    (literal (string-append (param "HOME") "/.gitconfig"))
+    (subpath (string-append (param "HOME") "/.config/git"))
+
+    ;; macOS Core Foundation: user text encoding (required by CF and security frameworks)
+    (literal (string-append (param "HOME") "/.CFUserTextEncoding"))
+
+    ;; Keychain (file read only; securityd still enforces per-item ACLs)
+    (subpath (string-append (param "HOME") "/Library/Keychains"))
+
+    ;; Claude Code legacy flat config (checked on startup for migration)
+    (literal (string-append (param "HOME") "/.claude.json"))
+
+    ;; Shell configs sourced when Claude Code spawns bash/zsh.
+    ;; C1 note: these files sometimes contain exported secrets (API keys, tokens).
+    ;; .zshrc and .bashrc are interactive-shell-only and NOT sourced by the
+    ;; non-interactive subprocesses Claude Code spawns, so they are excluded here
+    ;; to reduce exposure. The remaining files are sourced by login/env shells and
+    ;; are required for correct $PATH, $NVM_DIR, etc.
+    (literal (string-append (param "HOME") "/.zprofile"))
+    (literal (string-append (param "HOME") "/.zshenv"))
+    (literal (string-append (param "HOME") "/.bash_profile"))
+    (literal (string-append (param "HOME") "/.profile"))
+
+    ;; Working directory (the project being worked on)
+    (subpath (param "WORKING_DIR")))
+
+;; ===== File writes (strictly limited) =====
+(allow file-write*
+    ;; Claude config: sessions, history, stats, cache, telemetry
+    (subpath (string-append (param "HOME") "/.claude"))
+
+    ;; Legacy flat config: written on startup during settings migration
+    (literal (string-append (param "HOME") "/.claude.json"))
+    (literal (string-append (param "HOME") "/.claude.json.backup"))
+
+    ;; Working directory: source files, build artifacts, git state
+    (subpath (param "WORKING_DIR")))
+
+;; Project write hardening (credit: github.com/CJHwong/agent-seatbelt)
+;; WORKING_DIR write is intentionally broad, so deny sub-paths that can execute
+;; code or reconfigure tooling outside the sandbox. .git/hooks is the critical
+;; one: hooks written inside the sandbox run outside it on every git operation.
+(deny file-write*
+    (subpath (string-append (param "WORKING_DIR") "/.git/hooks"))
+    (literal (string-append (param "WORKING_DIR") "/.git/config"))
+    (literal (string-append (param "WORKING_DIR") "/.mcp.json"))
+    (subpath (string-append (param "WORKING_DIR") "/.vscode"))
+    (subpath (string-append (param "WORKING_DIR") "/.idea")))
+
+(allow file-write*
+    ;; Temp directories (build tools, npm, pip, etc.)
+    ;; M1: Use the parameterized TMPDIR (resolved canonical path) rather than
+    ;; all of /private/var/folders, which spans every app's temp tree and could
+    ;; allow overwriting credential files written by other processes.
+    (subpath "/private/tmp")
+    (subpath "/tmp")
+    (subpath (param "TMPDIR"))
+
+    ;; Device nodes: null, tty, ptmx/pts (Node.js needs ptmx to spawn
+    ;; subprocesses with a pty; without it the event loop hangs silently),
+    ;; and dtracehelper (written by security/CF frameworks on startup)
+    (literal "/dev/null")
+    (literal "/dev/tty")
+    (literal "/dev/ptmx")
+    (literal "/dev/dtracehelper")
+    (subpath "/dev/pts"))
+
+;; ===== TTY / pty ioctls =====
+;; tcgetattr/tcsetattr (raw mode), TIOCGWINSZ (terminal size), TIOCGETD, etc.
+;; Without this, TIOCGETD returns EPERM (not logged by sandbox), the terminal
+;; stays in cooked mode, and Ink's terminal capability queries get echoed as literal text.
+;;
+;; Intentionally NOT (subpath "/dev"): that would also grant ioctl on /dev/disk* and
+;; /dev/bpf*, which are readable under file-read-data above. Disk ioctls (DKIOCGETBLOCKCOUNT,
+;; DKIOCGETMEDIAUUID) and BPF ioctls (BIOCSETIF) are unnecessary here. Enumerate only the
+;; terminal device nodes that actually need it.
+(allow file-ioctl
+    (literal "/dev/tty")
+    (literal "/dev/ptmx")
+    (subpath "/dev/pts")
+    (regex #"^/dev/ttys[0-9]+$"))
+
+;; ===== Network =====
+;; DNS (mDNSResponder Unix socket)
+(allow network-outbound
+    (literal "/private/var/run/mDNSResponder"))
+;; Outbound TCP: Anthropic API, GitHub, npm, OTLP telemetry
+;; NOTE: Seatbelt network filters only accept * or localhost as the host — arbitrary
+;; IPs and CIDR ranges are rejected at profile compile time. LAN restriction to specific
+;; cluster IPs is not achievable here; use pf(4) if LAN isolation is required.
+(allow network-outbound
+    (remote tcp))
+;; Local binding for dev servers started by Claude Code.
+;; L3 accepted risk: unrestricted local bind/inbound means the sandboxed process
+;; could set up a listener on any port. This is intentional for dev-server support.
+(allow network-bind
+    (local tcp "*:*"))
+(allow network-inbound
+    (local tcp "*:*"))
+;; System socket creation (needed for TCP)
+(allow system-socket)
+
+;; ===== IPC =====
+;; Mach services: required for dyld, system services, XPC.
+;; H1 known limitation: (allow mach-lookup) without a service-name filter lets the
+;; sandboxed process reach com.apple.SecurityServer/securityd via XPC. That means
+;; `security` CLI or Security.framework can still query keychain items even though
+;; ~/Library/Keychains is file-read-only. Narrowing this to a specific allowlist
+;; breaks TLS certificate validation (Security.framework → securityd is on the hot
+;; path for every HTTPS request), so the tradeoff is accepted. Rely on per-item
+;; keychain ACLs to protect sensitive secrets.
+(allow mach-lookup)
+(allow mach-task-name)
+(allow ipc-posix-shm*)
+
+;; ===== Misc =====
+;; User defaults (terminal preferences, locale)
+(allow user-preference-read)
+;; JIT compilation in bundled Node.js runtime
+(allow dynamic-code-generation)

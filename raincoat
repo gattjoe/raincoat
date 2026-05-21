@@ -1,0 +1,42 @@
+#!/bin/bash
+# Runs Claude Code under a macOS Seatbelt sandbox.
+# Usage: raincoat [claude args...]
+#
+# Protects: ~/.ssh, ~/.aws, ~/.gnupg, other sensitive HOME paths
+# Allows:   ~/.claude, ~/.local/share/claude, working dir, system paths, Homebrew,
+#           ~/Library/Keychains (needed for OAuth session; securityd still enforces per-item ACLs)
+
+SANDBOX_PROFILE="${HOME}/.local/share/claude/claude-code.sb"
+WORKING_DIR="${PWD}"
+CLAUDE_BIN="${HOME}/.local/bin/claude"
+
+if [[ ! -f "${SANDBOX_PROFILE}" ]]; then
+    echo "error: sandbox profile not found at ${SANDBOX_PROFILE}" >&2
+    exit 1
+fi
+
+# M2: Seatbelt substitutes (param "WORKING_DIR") by string concatenation into the
+# policy DSL. A " or \ in the path would break the surrounding string-append
+# expressions and could silently widen the allowed set.
+if [[ "${WORKING_DIR}" == *'"'* || "${WORKING_DIR}" == *'\'* ]]; then
+    echo "error: WORKING_DIR contains characters unsafe for sandbox policy (\" or \\)" >&2
+    exit 1
+fi
+
+# M1: Resolve TMPDIR to its canonical path (macOS $TMPDIR is /var/folders/…,
+# a symlink that Seatbelt won't follow — pass the real path so the profile
+# covers exactly this user's temp tree and nothing broader.
+_TMPDIR="${TMPDIR:-/tmp}"
+_TMPDIR="$( (cd "${_TMPDIR}" && pwd -P) 2>/dev/null || echo /private/tmp)"
+
+if [[ ! -x "${CLAUDE_BIN}" ]]; then
+    # L1: Fall back to PATH; warn explicitly so the user knows which binary runs.
+    CLAUDE_BIN="$(command -v claude)" || { echo "error: claude not found" >&2; exit 1; }
+    echo "warning: ~/.local/bin/claude not found, using ${CLAUDE_BIN}" >&2
+fi
+
+exec sandbox-exec -f "${SANDBOX_PROFILE}" \
+    -D HOME="${HOME}" \
+    -D WORKING_DIR="${WORKING_DIR}" \
+    -D TMPDIR="${_TMPDIR}" \
+    "${CLAUDE_BIN}" "$@"
