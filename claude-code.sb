@@ -78,6 +78,10 @@
     (subpath (string-append (param "HOME") "/.local/share/claude"))
     (subpath (string-append (param "HOME") "/.local/bin"))
 
+    ;; Claude Code runtime dirs (staging files, lock files)
+    (subpath (string-append (param "HOME") "/.cache/claude"))
+    (subpath (string-append (param "HOME") "/.local/state/claude"))
+
     ;; Claude config: settings, history, sessions, plugins, skills, memory
     (subpath (string-append (param "HOME") "/.claude"))
 
@@ -87,6 +91,12 @@
     ;; Git config (needed for git operations in working dir)
     (literal (string-append (param "HOME") "/.gitconfig"))
     (subpath (string-append (param "HOME") "/.config/git"))
+
+    ;; gh CLI config (authentication, hosts).
+    ;; C2: hosts.yml contains GitHub OAuth tokens. All Claude Code subprocesses
+    ;; inherit this read grant, not only gh itself. Scoped to ~/.config/gh (not
+    ;; ~/.config broadly) to limit exposure to other app configs.
+    (subpath (string-append (param "HOME") "/.config/gh"))
 
     ;; macOS Core Foundation: user text encoding (required by CF and security frameworks)
     (literal (string-append (param "HOME") "/.CFUserTextEncoding"))
@@ -116,9 +126,17 @@
     ;; Claude config: sessions, history, stats, cache, telemetry
     (subpath (string-append (param "HOME") "/.claude"))
 
-    ;; Legacy flat config: written on startup during settings migration
+    ;; Claude Code runtime dirs (staging files, lock files)
+    (subpath (string-append (param "HOME") "/.cache/claude"))
+    (subpath (string-append (param "HOME") "/.local/state/claude"))
+
+    ;; Legacy flat config: written on startup during settings migration.
+    ;; Claude Code uses a lock + atomic-temp pattern for safe writes, same as
+    ;; the keychain fix — allow the lock and temp files alongside the target.
     (literal (string-append (param "HOME") "/.claude.json"))
     (literal (string-append (param "HOME") "/.claude.json.backup"))
+    (literal (string-append (param "HOME") "/.claude.json.lock"))
+    (regex (string-append "^" (param "HOME") "/\\.claude\\.json\\.tmp\\.[^/]+$"))
 
     ;; Keychain: the `security` CLI uses a write-to-temp-then-rename pattern
     ;; when updating the keychain database. Without write access to these temp
@@ -130,6 +148,14 @@
 
     ;; Working directory: source files, build artifacts, git state
     (subpath (param "WORKING_DIR")))
+
+;; Credential-store lockdown — explicit no-log denies so intent is documented
+;; and these paths stay blocked even if a future broad allow accidentally overlaps.
+(deny file-read* (with no-log)
+    (subpath (string-append (param "HOME") "/.ssh"))
+    (subpath (string-append (param "HOME") "/.aws"))
+    (subpath (string-append (param "HOME") "/.gnupg"))
+    (subpath (string-append (param "HOME") "/.kube")))
 
 ;; Project write hardening (credit: github.com/CJHwong/agent-seatbelt)
 ;; WORKING_DIR write is intentionally broad, so deny sub-paths that can execute
@@ -178,7 +204,7 @@
     (literal "/dev/tty")
     (literal "/dev/ptmx")
     (subpath "/dev/pts")
-    (regex #"^/dev/ttys[0-9]+$"))
+    (regex "^/dev/ttys[0-9]+$"))
 
 ;; ===== Network =====
 ;; DNS (mDNSResponder Unix socket)
