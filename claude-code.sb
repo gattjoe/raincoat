@@ -120,6 +120,14 @@
     (literal (string-append (param "HOME") "/.claude.json"))
     (literal (string-append (param "HOME") "/.claude.json.backup"))
 
+    ;; Keychain: the `security` CLI uses a write-to-temp-then-rename pattern
+    ;; when updating the keychain database. Without write access to these temp
+    ;; files, SecKeychainItemCreateFromContent returns EPERM (silent — no deny
+    ;; log entry), preventing OAuth token refresh from persisting and causing
+    ;; re-login every ~1 hour. Allow only the .sb-* atomic temp files, not the
+    ;; keychain database itself; securityd still enforces per-item ACLs.
+    (regex (string-append "^" (param "HOME") "/Library/Keychains/login\\.keychain-db\\.sb-[^/]+$"))
+
     ;; Working directory: source files, build artifacts, git state
     (subpath (param "WORKING_DIR")))
 
@@ -153,6 +161,11 @@
     (subpath "/dev/pts"))
 
 ;; ===== TTY / pty ioctls =====
+;; Suppress dtracehelper ioctl noise: every sh/bash/git/security subprocess
+;; attempts DTRACEHIOC_ADD at startup. The deny is correct but generates
+;; ~2400+ log entries per session, masking real deny events.
+(deny file-ioctl (with no-log)
+    (literal "/dev/dtracehelper"))
 ;; tcgetattr/tcsetattr (raw mode), TIOCGWINSZ (terminal size), TIOCGETD, etc.
 ;; Without this, TIOCGETD returns EPERM (not logged by sandbox), the terminal
 ;; stays in cooked mode, and Ink's terminal capability queries get echoed as literal text.
