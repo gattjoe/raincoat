@@ -157,6 +157,32 @@
     (subpath (string-append (param "HOME") "/.gnupg"))
     (subpath (string-append (param "HOME") "/.kube")))
 
+;; Browser credential-store lockdown.
+;; These dirs contain Login Data (saved passwords), Cookies, session tokens, and
+;; sync tokens. Blocked by default deny already for file-read-data, but made
+;; explicit here because:
+;;   (a) the file-read-xattr block has a broad (subpath ~/Library) allow that
+;;       would otherwise permit xattr reads on these dirs, and
+;;   (b) a future ~/Library file-read-data widening would silently expose them.
+;; file-read* covers file-read-data, file-read-metadata, and file-read-xattr.
+;; Observed in deny log: Claude Code (2.1.153) probed Chrome, Brave, Arc, Edge,
+;; Chromium, Vivaldi, Opera in one session. Firefox, 1Password, Bitwarden added proactively.
+(deny file-read* (with no-log)
+    (subpath (string-append (param "HOME") "/Library/Application Support/Google/Chrome"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/BraveSoftware"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/Arc"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/Microsoft Edge"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/Chromium"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/Vivaldi"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/com.operasoftware.Opera"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/Firefox"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/1Password"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/1Password 7"))
+    (subpath (string-append (param "HOME") "/Library/Application Support/Bitwarden"))
+    ;; 1Password 8 stores vault data in Group Containers, not Application Support.
+    ;; The file-read-xattr ~/Library allow covers ~/Library/Group Containers too.
+    (subpath (string-append (param "HOME") "/Library/Group Containers/2BUA8C4S2C.com.agilebits")))
+
 ;; Project write hardening (credit: github.com/CJHwong/agent-seatbelt)
 ;; WORKING_DIR write is intentionally broad, so deny sub-paths that can execute
 ;; code or reconfigure tooling outside the sandbox. .git/hooks is the critical

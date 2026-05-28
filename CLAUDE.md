@@ -26,8 +26,11 @@ Run a command under the profile to verify a rule:
 sandbox-exec -f claude-code.sb \
   -D HOME="$HOME" \
   -D WORKING_DIR="$PWD" \
+  -D TMPDIR="$(cd "${TMPDIR:-/tmp}" && pwd -P)" \
   bash -c "<command to test>"
 ```
+
+All three params (`HOME`, `WORKING_DIR`, `TMPDIR`) are required. If `TMPDIR` is omitted, `(param "TMPDIR")` evaluates to `""` and `(subpath "")` matches all paths — the file-write* and file-read-xattr rules become unbounded, making the test sandbox silently far more permissive than production.
 
 Watch deny events in real time (separate terminal):
 
@@ -75,3 +78,4 @@ Silent EPERM (no deny log entry) is the failure mode when the temp/lock write is
 - **Network**: Seatbelt `network-outbound` only accepts `*` or `localhost` as host values — arbitrary IPs and CIDRs fail at compile time. The profile uses `(remote tcp)` (unrestricted). Use `pf(4)` if per-host restriction is needed.
 - **`sandbox-exec` is deprecated** by Apple but functional on macOS 14+. Tested on macOS 15 arm64.
 - **TTY ioctls** are scoped to terminal nodes only (`/dev/tty`, `/dev/ptmx`, `/dev/pts`, `ttys[0-9]+`), not `(subpath "/dev")`, to avoid granting unnecessary disk/BPF ioctls.
+- **Required params**: `HOME`, `WORKING_DIR`, and `TMPDIR` must all be supplied to `sandbox-exec -D`. Missing `TMPDIR` makes `(subpath "")` match all paths — the sandbox is silently unbounded. The `raincoat` wrapper resolves and passes all three correctly.
