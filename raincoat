@@ -29,6 +29,11 @@ fi
 _TMPDIR="${TMPDIR:-/tmp}"
 _TMPDIR="$( (cd "${_TMPDIR}" && pwd -P) 2>/dev/null || echo /private/tmp)"
 
+# com.apple.provenance on history.jsonl triggers a System Policy evaluation when
+# the file is read under the sandbox, causing a silent EPERM. Strip it at launch
+# so re-created files (e.g. after /clear) don't silently break history writes.
+xattr -d com.apple.provenance "${HOME}/.claude/history.jsonl" 2>/dev/null || true
+
 if [[ ! -x "${CLAUDE_BIN}" ]]; then
     # L1: Fall back to PATH; warn explicitly so the user knows which binary runs.
     CLAUDE_BIN="$(command -v claude)" || { echo "error: claude not found" >&2; exit 1; }
